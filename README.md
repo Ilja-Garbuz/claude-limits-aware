@@ -69,6 +69,13 @@ compacts on its own if the next turn still doesn't (once per 5-hour window, larg
 
 **`/limits`** shows the live figures any time.
 
+**When does it run?** Only while Claude is working: the hook fires on tool calls, prompts and
+session start, and the background `/usage` read starts only from that hook. An open but idle
+session, or Claude Desktop with no conversation running, runs nothing.
+
+**Troubleshooting compaction:** every scheduled compaction and its outcome (compacted, retried,
+queued as `/compact`, failed with the reason) is logged to `<config dir>/limits/compact.log`.
+
 ## Settings
 
 `/plugin` > limits-aware > configure:

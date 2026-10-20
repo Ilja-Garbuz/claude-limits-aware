@@ -29,7 +29,6 @@ type Verdict = {
   windows?: { five_hour?: { pct: number; resets_at?: number | null }; seven_day?: { pct: number } }
 }
 
-let pending: string | undefined
 // A window's reset time drifts by a minute between readings, so compare loosely.
 const sameWindow = (a: number | null | undefined, b: number | null | undefined) =>
   a !== undefined && b !== undefined && (a === b || (a !== null && b !== null && Math.abs(a - b) < 1800))
@@ -52,24 +51,90 @@ function headline(v: Verdict | undefined): string {
   const fh = v?.windows?.five_hour
   const wk = v?.windows?.seven_day
   const parts: string[] = []
-  if (fh) parts.push(`session ${fh.pct}%`)
-  if (wk) parts.push(`weekly ${wk.pct}%`)
+  if (fh) parts.push(`5-hour limit ${fh.pct}%`)
+  if (wk) parts.push(`weekly limit ${wk.pct}%`)
   return parts.length ? parts.join(', ') : 'limits unknown'
 }
 
+// Appends a line to <config dir>/limits/compact.log, so a compaction that didn't
+// happen can be explained afterwards.
+async function limitsDir($: EngineInterface): Promise<string> {
+  const cfg = (await $.env.get('CLAUDE_CONFIG_DIR')) ||
+    `${(await $.env.get('USERPROFILE')) || (await $.env.get('HOME')) || '.'}/.claude`
+  return `${cfg.replace(/\\/g, '/')}/limits`
+}
+
+// The scheduled compaction lives in a file, not in module memory: a plugin reload
+// or a restarted hooks worker starts the module over, which lost it before.
+async function pendingFile($: EngineInterface): Promise<string> {
+  return `${await limitsDir($)}/sessions/${(await $.session.id()).replace(/[^\w.-]/g, '_')}.compact`
+}
+async function readPending($: EngineInterface): Promise<string | undefined> {
+  try { return (await $.fs.read(await pendingFile($))).trim() || undefined } catch { return undefined }
+}
+async function writePending($: EngineInterface, text: string) {
+  await $.fs.write(await pendingFile($), text)
+}
+
+async function note($: EngineInterface, line: string) {
+  try {
+    const file = `${await limitsDir($)}/compact.log`
+    let prev = ''
+    try { prev = await $.fs.read(file) } catch { /* first line */ }
+    const kept = prev.split('\n').filter(Boolean).slice(-200)
+    kept.push(`${new Date(await $.clock.now()).toISOString()} ${line}`)
+    await $.fs.write(file, kept.join('\n') + '\n')
+  } catch { /* logging must never break anything */ }
+}
+
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300)
+
+// Runs the compaction once the session is idle. $.session.compact rejects while a
+// turn is still running (retried for a while) and in headless/SDK hosts such as
+// Claude Desktop (not supported there); then /compact is queued as if typed,
+// which the engine runs as soon as the session is idle.
+let inFlight = false
+
 async function compactSoon($: EngineInterface, instructions: string, why: string) {
-  $.clock.after(1500, () => {
+  if (inFlight) return
+  inFlight = true
+  await note($, `scheduled (${why})`)
+  let tries = 0
+  const attempt = () => {
     void (async () => {
+      tries += 1
+      let retrying = false
       try {
-        $.ui.toast(`limits-aware: compacting (${why})`)
         const res = await $.session.compact({ instructions })
-        if ('skip' in res && res.skip) $.ui.log(`limits-aware: compaction skipped: ${res.skip}`)
-      } catch {
-        // a new turn started first: try again when that one ends
-        pending = pending ?? instructions
+        if ('skip' in res && res.skip) {
+          await writePending($, '')
+          await note($, `skipped by a hook: ${res.skip}`)
+          $.ui.log(`limits-aware: compaction skipped: ${res.skip}`)
+        } else {
+          await writePending($, '')
+          await note($, `compacted (try ${tries})`)
+          try { $.ui.toast(`limits-aware: compacted (${why})`) } catch { /* no surface */ }
+        }
+      } catch (err) {
+        await note($, `try ${tries} rejected: ${errText(err)}`)
+        // Desktop and other SDK hosts can't compact from a plugin directly: go
+        // straight to the queued /compact there. Elsewhere, retry while busy.
+        const headless = /headless|SDK/i.test(errText(err))
+        if (!headless && tries < 8) { retrying = true; $.clock.after(4000, attempt); return }
+        try {
+          await $.command.run({ command: 'compact', args: instructions })
+          await writePending($, '')
+          await note($, 'queued /compact instead')
+        } catch (err2) {
+          await note($, `queuing /compact failed: ${errText(err2)}`)
+          $.ui.log('limits-aware: could not compact; run /compact by hand')
+        }
+      } finally {
+        if (!retrying) inFlight = false
       }
     })()
-  })
+  }
+  $.clock.after(1500, attempt)
 }
 
 export const register: Register = (on, options) => {
@@ -106,10 +171,11 @@ export const register: Register = (on, options) => {
     }
   })
 
-  on('tool.call', { tool: 'mcp__limits-aware__compact_after_turn' }, async (_$, e) => {
+  on('tool.call', { tool: 'mcp__limits-aware__compact_after_turn' }, async ($, e) => {
     const raw = e['focus']
     const focus = typeof raw === 'string' ? raw : ''
-    pending = focus ? `${BASE} Also keep: ${focus}` : BASE
+    await writePending($, focus ? `${BASE} Also keep: ${focus}` : BASE)
+    await note($, 'compact_after_turn called')
     return { result: 'Compaction scheduled: it runs when this turn ends. End the turn with a short summary for the user.' }
   }).catch(() => ({ deny: 'limits-aware: could not schedule the compaction; ask the user to run /compact.' }))
 
@@ -117,9 +183,8 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.agentId !== undefined || mode === 'off') return done
 
-    if (pending) {
-      const instructions = pending
-      pending = undefined
+    const instructions = await readPending($)
+    if (instructions) {
       const v = await verdict($)
       autoDoneFor = v?.windows?.five_hour?.resets_at ?? null
       await compactSoon($, instructions, headline(v))
@@ -144,6 +209,7 @@ export const register: Register = (on, options) => {
       return done
     }
     autoDoneFor = resetsAt
+    await writePending($, BASE)
     await compactSoon($, BASE, `${headline(v)}, no notes call`)
     return done
   })

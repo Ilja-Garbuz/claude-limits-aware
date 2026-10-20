@@ -45,7 +45,7 @@ const THROTTLE_S = num('CLAUDE_LIMITS_THROTTLE_S', 30) // hook evaluates at most
 const REMIND_S = num('CLAUDE_LIMITS_REMIND_S', 600)    // repeat a wrap/stop note this often
 const ETA_WRAP_MIN = num('CLAUDE_LIMITS_ETA_WRAP_MIN', 20) // projected to hit 100% within N min -> wrap
 const BANDS = ['ok', 'caution', 'wrap', 'stop']
-const LABEL = { five_hour: 'session (5h)', seven_day: 'weekly' }
+const LABEL = { five_hour: '5-hour session limit', seven_day: 'weekly limit' }
 
 const now = () => Math.floor(Date.now() / 1000)
 const readJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return null } }
@@ -198,15 +198,15 @@ const clock = epoch => {
 const inMin = m => (m === null || m === undefined ? '' : m < 90 ? ` (in ${m} min)` : ` (in ${Math.round(m / 6) / 10} h)`)
 
 export function describe(v) {
-  if (v.band === 'unknown') return 'Limits: no reading yet.'
+  if (v.band === 'unknown') return 'Limits (subscription usage, not context): no reading yet.'
   const parts = []
   for (const kind of ['five_hour', 'seven_day']) {
     const w = v.windows[kind]
     if (!w) continue
     parts.push(w.reset ? `${LABEL[kind]}: window has reset` : `${LABEL[kind]} ${w.pct}% used, resets ${clock(w.resets_at)}${inMin(w.resets_in_min)}`)
   }
-  if (v.eta_min !== null) parts.push(`at the current rate the session limit is reached in ~${v.eta_min} min`)
-  return `Limits: ${parts.join('; ')}. Band: ${v.band.toUpperCase()}.`
+  if (v.eta_min !== null) parts.push(`at the current rate the 5-hour limit is reached in ~${v.eta_min} min`)
+  return `Limits (subscription usage, not context): ${parts.join('; ')}. Band: ${v.band.toUpperCase()}.`
 }
 
 const ADVICE = {
