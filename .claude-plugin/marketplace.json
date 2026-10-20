@@ -1,0 +1,6 @@
+{
+  "name": "limits-aware",
+  "owner": { "name": "Ilja Garbuz" },
+  "description": "Session and weekly limit awareness for Claude Code subscriptions",
+  "plugins": [{ "name": "limits-aware", "source": "./", "description": "Session and weekly limit awareness for Claude Code" }]
+}

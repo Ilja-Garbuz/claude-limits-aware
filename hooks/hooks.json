@@ -1,0 +1,8 @@
+{
+  "modules": ["./register.ts"],
+  "hooks": {
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-limits.mjs\" hook", "timeout": 10 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-limits.mjs\" hook", "timeout": 10 }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-limits.mjs\" hook", "timeout": 10 }] }]
+  }
+}

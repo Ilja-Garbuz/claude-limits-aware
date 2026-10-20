@@ -1,0 +1,22 @@
+{
+  "name": "limits-aware",
+  "version": "0.1.1",
+  "description": "Keeps Claude Code aware of subscription session (5h) and weekly limits at no cost, nudges it to wrap up by band, and compacts after it saves its notes.",
+  "author": { "name": "Ilja Garbuz" },
+  "license": "MIT",
+  "userConfig": {
+    "autoCompact": {
+      "type": "string",
+      "title": "Compaction near the limit",
+      "description": "agent: compact only when Claude calls compact_after_turn. fallback: also ask Claude to save notes and compact when a turn ends in WRAP/STOP. off: never compact.",
+      "default": "fallback",
+      "options": ["fallback", "agent", "off"]
+    },
+    "minContextPercent": {
+      "type": "number",
+      "title": "Minimum context for fallback compaction (%)",
+      "description": "The fallback leaves smaller conversations alone; compacting them saves little.",
+      "default": 30
+    }
+  }
+}
