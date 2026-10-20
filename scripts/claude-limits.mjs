@@ -117,9 +117,12 @@ export function parseUsage(text) {
 
 function liveRead() {
   const bin = process.env.CLAUDE_LIMITS_CLAUDE_BIN || 'claude'
-  const r = spawnSync(bin, ['-p', '/usage', '--safe-mode', '--no-session-persistence'], {
-    encoding: 'utf8', timeout: 30_000, env: process.env, shell: process.platform === 'win32',
-  })
+  const args = ['-p', '/usage', '--safe-mode', '--no-session-persistence']
+  // windowsHide: no console window on Windows. Run the binary directly (claude.exe from the
+  // native installer); only an npm install (claude.cmd) needs a shell, still hidden.
+  const opts = { encoding: 'utf8', timeout: 30_000, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
+  let r = spawnSync(bin, args, opts)
+  if (r.error?.code === 'ENOENT' && process.platform === 'win32') r = spawnSync(bin, args, { ...opts, shell: true })
   if (r.status !== 0 || !r.stdout) return null
   const w = parseUsage(r.stdout)
   return Object.keys(w).length ? saveWindows(w, 'live') : null
@@ -132,6 +135,7 @@ function refreshInBackground() {
     const st = fs.existsSync(LOCK) ? fs.statSync(LOCK) : null
     if (st && Date.now() - st.mtimeMs < STALE_S * 1000) return
     fs.writeFileSync(LOCK, String(process.pid))
+    // detached so the read outlives the hook; windowsHide keeps its console hidden on Windows
     const child = spawn(process.execPath, [SELF, 'refresh'], { detached: true, stdio: 'ignore', env: process.env, windowsHide: true })
     child.unref()
   } catch { /* best effort */ }

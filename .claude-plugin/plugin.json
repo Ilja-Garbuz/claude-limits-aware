@@ -1,6 +1,6 @@
 {
   "name": "limits-aware",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Keeps Claude Code aware of subscription session (5h) and weekly limits at no cost, nudges it to wrap up by band, and compacts after it saves its notes.",
   "author": { "name": "Ilja Garbuz" },
   "license": "MIT",
